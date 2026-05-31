@@ -1,0 +1,26 @@
+# ==========================================
+# IBS Logistics Orchestrator Dependencies
+# ==========================================
+
+# --- Web Framework & API ---
+fastapi>=0.100.0        # High-performance REST framework
+uvicorn[standard]>=0.23.0 # ASGI web server to run FastAPI
+pydantic>=2.0.0         # Data validation and schemas (used by FastAPI and LangChain)
+pydantic-settings>=2.0.0 # Environment variable management
+
+# --- AI & Multi-Agent Orchestration (LangChain Ecosystem) ---
+langchain>=0.1.0        # Core framework for LLM application development
+langchain-core>=0.1.0   # Base abstractions for LangChain
+langgraph>=0.0.26       # Stateful multi-agent orchestration (Supervisor & Sub-agents)
+langchain-openai>=0.0.5 # OpenAI integration (if using GPT-4)
+# langchain-google-genai>=0.0.9 # Uncomment if using Gemini instead of OpenAI
+
+# --- LLMOps & Observability ---
+langsmith>=0.1.0        # Tracing, monitoring, and evaluating agent performance
+
+# --- Event Streaming ---
+confluent-kafka>=2.3.0  # Robust Apache Kafka client for Python (Producers & Consumers)
+
+# --- Utilities ---
+python-dotenv>=1.0.0    # Loads environment variables from the .env file
+httpx>=0.25.0           # Async HTTP client (useful for mock external API calls)
