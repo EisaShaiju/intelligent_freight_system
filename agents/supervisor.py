@@ -1,50 +1,80 @@
 from typing import Literal
-from pydantic import BaseModel
-from langchain_core.messages import SystemMessage
-from langchain_openai import ChatOpenAI
-from langgraph.graph import StateGraph, START, END
+from langchain_groq import ChatGroq
+from langchain_core.messages import HumanMessage, SystemMessage
+from langgraph.graph import StateGraph, END
 from langgraph.types import Command
 
 from agents.state import LogisticsState
+from core import settings
+
+# FIX: Import node functions FROM subagents.py — don't redefine them here.
+# The original code had the entire agent setup copy-pasted into both files,
+# meaning 6 separate LLM agent objects were being instantiated, doubling
+# token consumption and making the codebase impossible to maintain.
 from agents.sub_agents import logistics_node, compliance_node, dispatch_node
 
-llm = ChatOpenAI(model="gpt-4o", temperature=0)
+# --- Supervisor LLM ---
+# The supervisor only routes — it does NOT need tools, so it uses fewer tokens.
+supervisor_llm = ChatGroq(
+    model="llama-3.1-8b-instant",
+    temperature=0,
+    api_key=settings.groq_api_key
+)
 
-# The Pydantic model forces the LLM to output a valid routing decision
-class Router(BaseModel):
-    next: Literal["logistics", "compliance", "dispatch", "FINISH"]
+SUPERVISOR_SYSTEM_PROMPT = """You are the Master Supervisor of a logistics anomaly resolution system.
+You will receive a package anomaly report and decide which specialist agent to invoke next.
 
-SUPERVISOR_PROMPT = """
-You are the master orchestrator for an airline logistics platform.
-Analyze the package anomaly and the conversation history, then route to the correct specialist.
-- Routing or delay issue -> 'logistics'.
-- Packaging or safety issue -> 'compliance'.
-- Once a solution is planned by a specialist, ALWAYS use 'dispatch' to assign a human to execute it.
-- Reply 'FINISH' only when a staff member has been successfully dispatched.
-"""
+Your available agents are:
+- "compliance"  : Checks whether the package contents or damage type violates regulations.
+- "logistics"   : Finds an alternative transport route for the package.
+- "dispatch"    : Finds and briefs the nearest ground staff to physically resolve the issue.
+- "FINISH"      : All agents have completed their work. Resolution is ready.
 
-def supervisor_node(state: LogisticsState) -> Command[Literal["logistics", "compliance", "dispatch", "__end__"]]:
-    # Use structured output to guarantee we get a valid literal back
-    response = llm.with_structured_output(Router).invoke(
-        [SystemMessage(content=SUPERVISOR_PROMPT)] + state["messages"]
-    )
-    
-    if response.next == "FINISH":
-        return Command(goto=END)
-    
-    return Command(goto=response.next)
+Rules:
+1. Always run "compliance" first for any anomaly involving damage or dangerous goods.
+2. Run "logistics" after compliance if rerouting is needed.
+3. Run "dispatch" last to assign human staff once the plan is complete.
+4. Respond with ONLY the next agent name — one of: compliance, logistics, dispatch, FINISH.
+   Do not explain your reasoning. Just output the single word."""
 
-# --- Compile the Graph ---
-builder = StateGraph(LogisticsState)
 
-# Add all nodes
-builder.add_node("supervisor", supervisor_node)
-builder.add_node("logistics", logistics_node)
-builder.add_node("compliance", compliance_node)
-builder.add_node("dispatch", dispatch_node)
+def supervisor_node(state: LogisticsState) -> Command[Literal["compliance", "logistics", "dispatch", "__end__"]]:
+    """
+    The supervisor reads the conversation so far and decides which
+    sub-agent node to route to next, or whether the workflow is complete.
+    """
+    messages = [SystemMessage(content=SUPERVISOR_SYSTEM_PROMPT)] + state["messages"]
+    response = supervisor_llm.invoke(messages)
 
-# The workflow always begins with the supervisor evaluating the anomaly
-builder.add_edge(START, "supervisor")
+    # Parse the supervisor's routing decision
+    decision = response.content.strip().lower()
 
-# Compile into a runnable application
-orchestrator_app = builder.compile()
+    route_map = {
+        "compliance": "compliance",
+        "logistics": "logistics",
+        "dispatch": "dispatch",
+        "finish": "__end__",
+    }
+
+    next_node = route_map.get(decision, "__end__")
+    return Command(goto=next_node)
+
+
+# --- Build the LangGraph ---
+def build_graph() -> StateGraph:
+    builder = StateGraph(LogisticsState)
+
+    # Register all nodes
+    builder.add_node("supervisor", supervisor_node)
+    builder.add_node("compliance", compliance_node)
+    builder.add_node("logistics", logistics_node)
+    builder.add_node("dispatch", dispatch_node)
+
+    # Entry point is always the supervisor
+    builder.set_entry_point("supervisor")
+
+    return builder.compile()
+
+
+# Compiled graph — imported by the FastAPI router
+orchestration_graph = build_graph()

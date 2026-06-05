@@ -2,17 +2,19 @@ from fastapi import APIRouter, HTTPException
 from api.schemas import OrchestrationRequest, OrchestrationResponse
 
 # Import the compiled LangGraph application we built earlier
-from agents.supervisor import orchestrator_app
+# (Note: Ensure this matches the exact variable name exported from supervisor.py)
+from agents.supervisor import orchestration_graph 
 
 router = APIRouter(
     prefix="/api/v1/orchestrator",
     tags=["Orchestration"]
 )
 
-@router.post("/trigger", response_model=OrchestrationResponse)
+@router.post("/trigger")
 async def trigger_workflow(request: OrchestrationRequest):
     """
-    Triggers the LangGraph multi-agent workflow to resolve a logistics anomaly.
+    Triggers the LangGraph multi-agent workflow to resolve a logistics anomaly,
+    and returns the exact execution plan drafted by the agents.
     """
     # 1. Translate the incoming API request into the format our LangGraph state expects
     initial_state = {
@@ -25,18 +27,30 @@ async def trigger_workflow(request: OrchestrationRequest):
     }
     
     try:
-        # 2. Invoke the graph synchronously for this demo 
-        # (In a massive production system, you'd use background tasks or Celery here)
-        result = await orchestrator_app.ainvoke(initial_state)
+        # 2. Invoke the graph asynchronously 
+        result = await orchestration_graph.ainvoke(initial_state)
         
-        return OrchestrationResponse(
-            status="success",
-            message="Workflow completed and resolution orchestrated.",
-            package_id=request.package_id
-        )
+        # 3. Extract the final message added by the last agent in the loop
+        final_state_messages = result.get("messages", [])
+        
+        if final_state_messages:
+            # Grab the text content of the very last LLM interaction
+            final_agent_decision = final_state_messages[-1].content
+        else:
+            final_agent_decision = "No solution generated."
+            
+        # 4. Return the rich data back to the client
+        return {
+            "status": "success",
+            "package_id": request.package_id,
+            "resolution_status": result.get("resolution_status", "unknown"),
+            "final_action_taken": final_agent_decision
+        }
+        
     except Exception as e:
         # If the LLM fails or tools crash, return a clean 500 error
         raise HTTPException(status_code=500, detail=f"Orchestration failed: {str(e)}")
+
 
 @router.get("/status/{package_id}")
 async def get_status(package_id: str):

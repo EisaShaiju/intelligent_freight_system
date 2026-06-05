@@ -1,3 +1,2 @@
-from agents.supervisor import orchestrator_app
-
-__all__ = ["orchestrator_app"]
+from agents.supervisor import orchestration_graph
+__all__ = ["orchestration_graph"]

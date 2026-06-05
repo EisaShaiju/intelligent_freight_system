@@ -1,5 +1,6 @@
 from pydantic_settings import BaseSettings
 from functools import lru_cache
+import os
 
 class Settings(BaseSettings):
     """
@@ -11,8 +12,8 @@ class Settings(BaseSettings):
     port: int = 8000
     
     # LLM API Keys
-    openai_api_key: str = ""
-    # gemini_api_key: str = "" # Uncomment if you switch to Gemini
+    gemini_api_key: str = os.getenv("GEMINI_API_KEY", "")
+    groq_api_key: str = os.getenv("GROQ_API_KEY", "")
     
     # Kafka Configuration
     kafka_broker_url: str = "localhost:9092"
