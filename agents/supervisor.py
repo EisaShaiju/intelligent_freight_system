@@ -7,14 +7,17 @@ from langgraph.types import Command
 from agents.state import LogisticsState
 from core import settings
 
-# FIX: Import node functions FROM subagents.py — don't redefine them here.
-# The original code had the entire agent setup copy-pasted into both files,
-# meaning 6 separate LLM agent objects were being instantiated, doubling
-# token consumption and making the codebase impossible to maintain.
 from agents.sub_agents import logistics_node, compliance_node, dispatch_node
 
+from langgraph.checkpoint.sqlite import SqliteSaver
+import sqlite3
+
+# --- 1. Initialize the Database Memory ---
+# Connect to SQLite and initialize the saver
+conn = sqlite3.connect("logistics_memory.sqlite", check_same_thread=False)
+memory = SqliteSaver(conn)
+
 # --- Supervisor LLM ---
-# The supervisor only routes — it does NOT need tools, so it uses fewer tokens.
 supervisor_llm = ChatGroq(
     model="llama-3.1-8b-instant",
     temperature=0,
@@ -61,7 +64,7 @@ def supervisor_node(state: LogisticsState) -> Command[Literal["compliance", "log
 
 
 # --- Build the LangGraph ---
-def build_graph() -> StateGraph:
+def build_graph():
     builder = StateGraph(LogisticsState)
 
     # Register all nodes
@@ -73,7 +76,8 @@ def build_graph() -> StateGraph:
     # Entry point is always the supervisor
     builder.set_entry_point("supervisor")
 
-    return builder.compile()
+    # --- 2. Attach the memory to the graph compilation ---
+    return builder.compile(checkpointer=memory)
 
 
 # Compiled graph — imported by the FastAPI router

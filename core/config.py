@@ -19,6 +19,10 @@ class Settings(BaseSettings):
     kafka_broker_url: str = "localhost:9092"
     kafka_topic_anomalies: str = "logistics.anomalies"
 
+    # --- ADDED: Supabase Configuration ---
+    supabase_url: str = os.getenv("SUPABASE_URL", "")
+    supabase_key: str = os.getenv("SUPABASE_KEY", "")
+
     class Config:
         # Tells Pydantic to look for a .env file in the root directory
         env_file = ".env"

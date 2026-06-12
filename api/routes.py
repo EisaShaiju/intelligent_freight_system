@@ -1,8 +1,7 @@
 from fastapi import APIRouter, HTTPException
 from api.schemas import OrchestrationRequest, OrchestrationResponse
 
-# Import the compiled LangGraph application we built earlier
-# (Note: Ensure this matches the exact variable name exported from supervisor.py)
+# Import the compiled LangGraph application with memory attached
 from agents.supervisor import orchestration_graph 
 
 router = APIRouter(
@@ -11,35 +10,29 @@ router = APIRouter(
 )
 
 @router.post("/trigger")
-async def trigger_workflow(request: OrchestrationRequest):
+def trigger_workflow(request: OrchestrationRequest): # <-- FIX 1: Removed 'async'
     """
     Triggers the LangGraph multi-agent workflow to resolve a logistics anomaly,
-    and returns the exact execution plan drafted by the agents.
+    saving its conversational state securely under the package_id thread.
     """
-    # 1. Translate the incoming API request into the format our LangGraph state expects
     initial_state = {
         "package_id": request.package_id,
         "current_location": request.current_location,
         "anomaly_type": request.anomaly_type,
         "resolution_status": "pending",
-        # We give the supervisor an initial prompt to start the conversation
         "messages": [("user", f"Anomaly detected: {request.anomaly_type} for package {request.package_id} at {request.current_location}. Please resolve.")]
     }
     
     try:
-        # 2. Invoke the graph asynchronously 
-        result = await orchestration_graph.ainvoke(initial_state)
+        # Define the thread configuration
+        config = {"configurable": {"thread_id": request.package_id}}
         
-        # 3. Extract the final message added by the last agent in the loop
+        # --- FIX 2: Changed ainvoke to invoke, and removed await ---
+        result = orchestration_graph.invoke(initial_state, config=config)
+        
         final_state_messages = result.get("messages", [])
-        
-        if final_state_messages:
-            # Grab the text content of the very last LLM interaction
-            final_agent_decision = final_state_messages[-1].content
-        else:
-            final_agent_decision = "No solution generated."
+        final_agent_decision = final_state_messages[-1].content if final_state_messages else "No solution generated."
             
-        # 4. Return the rich data back to the client
         return {
             "status": "success",
             "package_id": request.package_id,
@@ -48,18 +41,37 @@ async def trigger_workflow(request: OrchestrationRequest):
         }
         
     except Exception as e:
-        # If the LLM fails or tools crash, return a clean 500 error
         raise HTTPException(status_code=500, detail=f"Orchestration failed: {str(e)}")
 
 
 @router.get("/status/{package_id}")
-async def get_status(package_id: str):
+def get_status(package_id: str): # <-- FIX 3: Removed 'async'
     """
-    Retrieves the status of a specific package's resolution.
-    Note: Requires a database (like Postgres/RDS) to be fully implemented.
+    Retrieves the exact historical logs and current state of a specific package
+    by pulling its snapshot from the SQLite checkpointer.
     """
-    # For now, this is a placeholder to show where your DB query would go
-    return {
-        "package_id": package_id, 
-        "status": "In a full deployment, this would query Postgres for the agent's historical logs."
-    }
+    try:
+        # Point to the exact same thread configuration
+        config = {"configurable": {"thread_id": package_id}}
+        
+        # Read the state snapshot straight out of the database (this is a sync call)
+        snapshot = orchestration_graph.get_state(config)
+        
+        # If the thread ID doesn't exist in the database tables yet
+        if not snapshot.values:
+            raise HTTPException(status_code=404, detail=f"No active resolution history found for package {package_id}")
+            
+        state_data = snapshot.values
+        messages = state_data.get("messages", [])
+        
+        return {
+            "package_id": package_id,
+            "current_anomaly": state_data.get("anomaly_type"),
+            "resolution_status": state_data.get("resolution_status"),
+            "agent_checkpoint_history_count": len(messages),
+            "latest_agent_update": messages[-1].content if messages else "No logs recorded."
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch status: {str(e)}")

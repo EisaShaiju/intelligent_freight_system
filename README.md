@@ -1,118 +1,180 @@
-# IBS Logistics Orchestrator: Multi-Agent Freight Resolution Platform
-
-[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![LangGraph](https://img.shields.io/badge/LangGraph-Multi--Agent-orange.svg)](https://python.langchain.com/docs/langgraph)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-green.svg)](https://fastapi.tiangolo.com/)
-[![Apache Kafka](https://img.shields.io/badge/Apache_Kafka-Event_Streaming-black.svg)](https://kafka.apache.org/)
+# Intelligent Freight System: Multi-Agent Anomaly Resolution Platform
 
 ## Overview
 
-The IBS Logistics Orchestrator is an event-driven, multi-agent AI platform designed to actively resolve routing anomalies in airline freight and baggage systems. It ingests real-time scan events via Apache Kafka and utilizes a LangGraph Supervisor Architecture to autonomously investigate delays, predict downstream impacts, and orchestrate ground staff dispatch.
+The Intelligent Freight System is a real-time, event-driven logistics platform designed to simulate, track, and autonomously resolve critical anomalies in global freight networks. By integrating high-frequency live flight telemetry with a multi-agent Large Language Model (LLM) orchestration layer, the system can detect transit deviations (e.g., thermal excursions, vibration spikes) and autonomously draft compliance-driven resolution directives.
+
+## System Architecture & Data Flow
+
+[INSERT_ARCHITECTURE_DIAGRAM_HERE]
+*(Recommended: Add a high-level sequence diagram showing Producer -> Kafka -> Consumer -> FastAPI/LangGraph -> Supabase)*
+
+The architecture is built on a decoupled, stream-processing paradigm to ensure high availability and prevent bottlenecks during data surges.
+
+### 1. Telemetry Ingestion (The Producer)
+
+* **Mechanism:** Python-based stateful producer that interfaces with the OpenSky API to track live global air traffic. Includes a graceful degradation fallback ("Ghost Flights") if rate-limited.
+* **Logic:** Tracks packages in 10-minute lifecycle batches (polling every 30 seconds for high data resolution). Calculates geospatial distance using the Haversine formula and injects randomized sensor data (temperature, vibration).
+* **Why:** Operating in local memory before publishing reduces unnecessary database reads, while the 30-second tick interval ensures anomalous sensor readings are caught before catastrophic failure.
+
+### 2. Event Streaming (Apache Kafka)
+
+* **Mechanism:** Containerized Apache Kafka and Zookeeper message broker.
+* **Why:** Acts as the critical shock absorber. Relational databases are inefficient at handling thousands of concurrent row updates per second. Kafka queues the raw telemetry, providing backpressure management. This allows the system to scale horizontally via Consumer Groups without overwhelming downstream APIs or the primary database.
+
+### 3. Stream Processing (The Consumer)
+
+* **Mechanism:** Continuously polls the Kafka topic (`logistics.anomalies`).
+* **Logic:** Acts as the routing gatekeeper. Standard positional updates are synced directly to the database. If a sensor threshold is breached (e.g., temperature > 35°C), it halts standard processing, flags the database to prevent duplicate triggers, and fires an HTTP POST request to the orchestration server.
+
+### 4. Agentic Orchestration (FastAPI + LangGraph)
+
+* **Mechanism:** A RESTful API built on FastAPI, serving as the interface for a LangGraph multi-agent network.
+* **Logic:** Utilizes a concurrent threading model. FastAPI accepts asynchronous requests and assigns them to synchronous background worker threads. LangGraph initializes a local SQLite Checkpointer using the `package_id` as a thread identifier to maintain isolated conversational memory.
+* **Agent Roles:**
+* **Supervisor:** Evaluates the anomaly and delegates tasks.
+* **Compliance:** Cross-references incident parameters against regulatory frameworks (e.g., Hazmat routing, UN3480 Lithium-Ion restrictions).
+* **Dispatch:** Formulates the final rerouting and isolation directives based on compliance constraints.
+
+
+
+### 5. Persistent Storage (Supabase)
+
+* **Mechanism:** Cloud-hosted PostgreSQL with Row-Level Security (RLS) configured for secure API access.
+* **Why:** Provides the central source of truth for all active freights, historical routes, and final AI-generated resolution summaries.
 
 ---
 
-## Core Architecture & Features
-
-- **Multi-Agent Reasoning (LangGraph):** A Supervisor router dynamically delegates logistical tasks to specialized sub-agents:
-  - **Logistics Agent:** Queries flight schedules and cargo capacities for rerouting.
-  - **Compliance Agent:** Evaluates packaging regulations and safety protocols.
-  - **Dispatch Agent:** Interfaces with HR systems to assign tasks to available ground staff.
-- **Event-Driven Ingestion (Apache Kafka):** Simulates high-throughput barcode scans and triggers agentic workflows instantly upon detecting anomalies.
-- **RESTful Microservices (FastAPI):** Exposes secure endpoints for manual workflow triggers and real-time state monitoring.
-- **External API Integration:** Features custom LangChain tools that securely wrap mock internal airline systems.
-
----
-
-## Project Structure
+## Repository Structure
 
 ```text
-ibs-logistics-orchestrator/
-├── api/
-│   ├── main.py
-│   ├── routes.py
-│   └── schemas.py
+intelligent_freight_system/
 ├── agents/
-│   ├── supervisor.py
-│   ├── sub_agents.py
-│   ├── state.py
-│   └── tools.py
-├── streaming/
-│   ├── consumer.py
-│   └── producer.py
-├── mock_services/
-│   ├── flight_api.py
-│   └── hr_api.py
+│   ├── __init__.py
+│   ├── state.py            # LangGraph state schema definition
+│   ├── sub_agents.py       # Logic for Compliance and Dispatch agents
+│   ├── supervisor.py       # Graph compilation and routing logic
+│   └── tools.py            # Tool definitions (e.g., policy retrieval)
+├── api/
+│   ├── __init__.py
+│   ├── main.py             # FastAPI application initialization
+│   ├── routes.py           # REST endpoints (/trigger, /status)
+│   └── schemas.py          # Pydantic models for request/response validation
 ├── core/
-│   ├── config.py
-│   └── logger.py
-├── docker-compose.yml
-├── Dockerfile
-├── requirements.txt
-└── .env
+│   ├── __init__.py
+│   ├── config.py           # Environment variable management
+│   ├── db.py               # Supabase client instantiation
+│   └── logger.py           # Centralized logging configuration
+├── mock_services/
+│   ├── __init__.py
+│   ├── flight_api.py       # Fallback OpenSky simulation logic
+│   └── hr_api.py           # Mock external service integrations
+├── streaming/
+│   ├── __init__.py
+│   ├── consumer.py         # Kafka consumer and DB sync logic
+│   └── producer.py         # Telemetry generation and Kafka publishing
+├── docker-compose.yaml     # Kafka and Zookeeper container definitions
+├── Dockerfile              # Containerization instructions for the Python app
+├── requirements.txt        # Python dependencies
+└── README.md               # Project documentation
+
 ```
+
+*(Note: SQLite database files `.sqlite`, `.sqlite-shm`, `.sqlite-wal` are generated at runtime for LangGraph memory state management and are excluded from version control).*
 
 ---
 
-## Quick Start Guide
+## Setup and Installation
 
-### 1. Prerequisites
+### Prerequisites
 
-- Python 3.10+
-- Docker & Docker Compose
-- OpenAI or Google Gemini API Key
+* Docker Desktop (for Kafka/Zookeeper)
+* Python 3.10+
+* Supabase Account & API Keys
 
-### 2. Installation
+### Environment Configuration
 
-```bash
-git clone https://github.com/yourusername/ibs-logistics-orchestrator.git
-cd ibs-logistics-orchestrator
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-```
-
-### 3. Environment Configuration
-
-Create a `.env` file in the root directory:
+Create a `.env` file in the root directory and populate it with the following:
 
 ```env
-# LLM Configuration
-OPENAI_API_KEY=your_openai_api_key_here
-# or GEMINI_API_KEY=your_gemini_api_key_here
+SUPABASE_URL="your_supabase_project_url"
+SUPABASE_KEY="your_supabase_anon_key"
+OPENAI_API_KEY="your_openai_api_key"
+KAFKA_BROKER_URL="localhost:9092"
 
-# Kafka Configuration
-KAFKA_BROKER_URL=localhost:9092
-KAFKA_TOPIC_ANOMALIES=logistics.anomalies
-
-# API Settings
-PORT=8000
-ENVIRONMENT=development
 ```
 
-### 4. Running the System
+### Installation Steps
 
-**Start the infrastructure (Kafka):**
+1. **Initialize the Virtual Environment:**
+```bash
+python -m venv .venv
+source .venv/Scripts/activate  # Windows
+# source .venv/bin/activate    # Mac/Linux
+pip install -r requirements.txt
 
+```
+
+
+2. **Boot the Messaging Infrastructure:**
 ```bash
 docker-compose up -d
+
 ```
 
-**Start the FastAPI server:**
+
+*Wait 15 seconds for Kafka's Java engine to allocate ports before proceeding.*
+3. **Configure the Database:**
+Ensure your Supabase table `tracked_packages` is created and that Row-Level Security (RLS) is either configured with appropriate INSERT/UPDATE policies or disabled for local development.
+
+---
+
+## Execution Flow
+
+To simulate the live environment, four isolated terminal instances are required (ensure the virtual environment is activated in each).
+
+**Terminal 1: The Orchestrator**
+Starts the FastAPI server to listen for emergency events.
 
 ```bash
-uvicorn api.main:app --reload --port 8000
+fastapi dev api/main.py
+
 ```
 
-> API documentation available at: http://localhost:8000/docs
-
-**Start the Kafka consumer:**
+**Terminal 2: The Consumer**
+Initiates the Kafka stream listener and database synchronization.
 
 ```bash
 python -m streaming.consumer
+
 ```
 
-**Simulate an event:**
+**Terminal 3: The Producer**
+Starts the 10-minute telemetry batch generation.
 
 ```bash
-python -m streaming.producer --type "missed_connection" --package_id "PKG-9942"
+python -m streaming.producer
+
 ```
+
+---
+
+## API Reference
+
+### `POST /api/v1/orchestrator/trigger`
+
+Fired automatically by the Consumer upon anomaly detection. Initializes the LangGraph workflow.
+**Payload:**
+
+```json
+{
+  "package_id": "PKG-202606-ABCDEF",
+  "current_location": "LAT: 23.31, LON: 87.31",
+  "anomaly_type": "CRITICAL_THERMAL_EXCURSION"
+}
+
+```
+
+### `GET /api/v1/orchestrator/status/{package_id}`
+
+Retrieves the localized state snapshot directly from the LangGraph SQLite memory checkpointer, allowing programmatic review of the agent's decision-making history without querying the primary PostgreSQL database.
