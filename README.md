@@ -6,14 +6,42 @@ The Intelligent Freight System is a real-time, event-driven logistics platform d
 
 ## System Architecture & Data Flow
 
-[INSERT_ARCHITECTURE_DIAGRAM_HERE]
-*(Recommended: Add a high-level sequence diagram showing Producer -> Kafka -> Consumer -> FastAPI/LangGraph -> Supabase)*
+graph LR
+    %% Styling
+    classDef python fill:#3776AB,stroke:#fff,stroke-width:2px,color:#fff,border-radius:5px;
+    classDef db fill:#3ECF8E,stroke:#fff,stroke-width:2px,color:#111,border-radius:5px;
+    classDef kafka fill:#231F20,stroke:#fff,stroke-width:2px,color:#fff,border-radius:5px;
+    classDef ai fill:#FF9900,stroke:#fff,stroke-width:2px,color:#111,border-radius:5px;
+
+    subgraph Data Ingestion & Streaming
+        direction TB
+        P[Producer Script]:::python
+        K{Apache Kafka}:::kafka
+        C[Consumer Script]:::python
+        P -- "2. Stream Telemetry" --> K
+        K -- "3. Poll Data" --> C
+    end
+
+    subgraph AI Orchestration Layer
+        direction TB
+        API[FastAPI Server]:::python
+        LG((LangGraph Agents)):::ai
+        API <-->|"6. State/Memory"| LG
+    end
+
+    DB[(Supabase DB)]:::db
+
+    %% External Connections
+    P -- "1. Init Package" --> DB
+    C -- "4. Update Coordinates" --> DB
+    C -- "5. POST /trigger (Anomaly)" --> API
+    API -- "7. Save Resolution Plan" --> DB
 
 The architecture is built on a decoupled, stream-processing paradigm to ensure high availability and prevent bottlenecks during data surges.
 
 ### 1. Telemetry Ingestion (The Producer)
 
-* **Mechanism:** Python-based stateful producer that interfaces with the OpenSky API to track live global air traffic. Includes a graceful degradation fallback ("Ghost Flights") if rate-limited.
+* **Mechanism:** Python-based stateful producer that interfaces with the OpenSky API to track live global air traffic. 
 * **Logic:** Tracks packages in 10-minute lifecycle batches (polling every 30 seconds for high data resolution). Calculates geospatial distance using the Haversine formula and injects randomized sensor data (temperature, vibration).
 * **Why:** Operating in local memory before publishing reduces unnecessary database reads, while the 30-second tick interval ensures anomalous sensor readings are caught before catastrophic failure.
 
