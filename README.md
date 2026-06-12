@@ -6,12 +6,13 @@ The Intelligent Freight System is a real-time, event-driven logistics platform d
 
 ## System Architecture & Data Flow
 
+```mermaid
 graph LR
     %% Styling
-    classDef python fill:#3776AB,stroke:#fff,stroke-width:2px,color:#fff,border-radius:5px;
-    classDef db fill:#3ECF8E,stroke:#fff,stroke-width:2px,color:#111,border-radius:5px;
-    classDef kafka fill:#231F20,stroke:#fff,stroke-width:2px,color:#fff,border-radius:5px;
-    classDef ai fill:#FF9900,stroke:#fff,stroke-width:2px,color:#111,border-radius:5px;
+    classDef python fill:#3776AB,stroke:#fff,stroke-width:2px,color:#fff;
+    classDef db fill:#3ECF8E,stroke:#fff,stroke-width:2px,color:#111;
+    classDef kafka fill:#231F20,stroke:#fff,stroke-width:2px,color:#fff;
+    classDef ai fill:#FF9900,stroke:#fff,stroke-width:2px,color:#111;
 
     subgraph Data Ingestion & Streaming
         direction TB
@@ -31,12 +32,11 @@ graph LR
 
     DB[(Supabase DB)]:::db
 
-    %% External Connections
     P -- "1. Init Package" --> DB
     C -- "4. Update Coordinates" --> DB
     C -- "5. POST /trigger (Anomaly)" --> API
     API -- "7. Save Resolution Plan" --> DB
-
+```
 The architecture is built on a decoupled, stream-processing paradigm to ensure high availability and prevent bottlenecks during data surges.
 
 ### 1. Telemetry Ingestion (The Producer)
